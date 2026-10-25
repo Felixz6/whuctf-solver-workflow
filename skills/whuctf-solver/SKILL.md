@@ -24,7 +24,7 @@ python3 prep/scripts/whuctf.py triage challenges/题目名
 python3 prep/scripts/whuctf.py check challenges/题目名
 ```
 
-`init` 会将输入归档到 `original/` 并复制到 `work/`，保存 SHA-256、manifest、notes 和 WP 模板；不会运行附件或自动提交 flag。检查 `notes.md` 后再选择实际类别。`triage` 校验归档 hash。系统有 `file` 时记录它的标准输出；有附件但没有该命令时向标准错误警告一次，只根据扩展名和文件头做分类提示。两种情况都不运行附件，也不跟随 `original/` 里的符号链接。
+`init` 会将输入归档到 `original/` 并复制到 `work/`，保存 SHA-256、manifest、notes 和 WP 模板；归档副本会去掉可执行位。不会运行附件或自动提交 flag。检查 `notes.md` 后再选择实际类别。`triage` 校验归档 hash。系统有 `file` 时记录它的标准输出；输出为空或仅为 `data`/`empty`，或有附件但没有该命令时，根据扩展名和文件头做分类提示。两种情况都不运行附件，也不跟随 `original/` 里的符号链接。
 
 - 原件保持不变；解包、patch、脱壳、hook 和调试只在 `work/` 副本中进行。
 - 记录影响路线的命令、输入、输出、退出码、中间值、假设和反证到 `notes.md` 与 `evidence/`。

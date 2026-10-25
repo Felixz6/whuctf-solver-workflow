@@ -204,6 +204,10 @@ class InitEdgeTest(unittest.TestCase):
             for name in ("", ".", "..", "a/b", "a\\b", "a:b", "a?", " a", "a ", "a.", "a\nb", None):
                 with self.assertRaises(ValueError):
                     w.init(SimpleNamespace(name=name))
+            for name in ("CON", "con", "COM1", "nul.txt", "LPT9"):
+                with self.assertRaises(ValueError) as caught:
+                    w.init(init_args(name, root / "reserved"))
+                self.assertIn("保留设备名", str(caught.exception))
             with self.assertRaises(ValueError) as caught:
                 w.init(SimpleNamespace(name="a" * 256))
             self.assertIn("过长", str(caught.exception))
@@ -211,6 +215,11 @@ class InitEdgeTest(unittest.TestCase):
             self.assertTrue((root / "long" / ("a" * 255)).is_dir())
             quiet_init(init_args("web.sql", root / "dotted"))
             self.assertTrue((root / "dotted" / "web.sql").is_dir())
+            # 附件源文件叫 CON.txt 可以：归档后变成 00-CON.txt。
+            reserved_src = root / "CON.txt"
+            reserved_src.write_text("x", encoding="utf-8")
+            quiet_init(init_args("ok-name", root / "reserved-attach", [reserved_src]))
+            self.assertTrue((root / "reserved-attach/ok-name/original/00-CON.txt").is_file())
 
             missing = root / "missing.bin"
             with self.assertRaises(ValueError) as caught:
@@ -265,6 +274,27 @@ class InitEdgeTest(unittest.TestCase):
                 w.init(args)
             self.assertEqual(list(args.root.glob(".init-*")), [])
 
+    def test_strips_execute_bits_and_cleans_stale_init(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tasks = root / "tasks"
+            tasks.mkdir()
+            stale = tasks / ".init-deadbeef"
+            stale.mkdir()
+            (stale / "leftover.txt").write_text("old", encoding="utf-8")
+            source = root / "tool.bin"
+            source.write_bytes(b"\x7fELF")
+            source.chmod(0o755)
+            self.assertTrue(source.stat().st_mode & 0o111)
+            quiet_init(init_args("bits", tasks, [source]))
+            self.assertFalse(stale.exists())
+            original = tasks / "bits/original/00-tool.bin"
+            work = tasks / "bits/work/00-tool.bin"
+            self.assertEqual(original.read_bytes(), source.read_bytes())
+            self.assertFalse(original.stat().st_mode & 0o111)
+            self.assertFalse(work.stat().st_mode & 0o111)
+            self.assertTrue(source.stat().st_mode & 0o111)
+
     def test_round_trip_does_not_pass_until_evidence_exists(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -302,6 +332,12 @@ class TriageEdgeTest(unittest.TestCase):
         self.assertEqual(w.magic_hint(b"\x7fELF" + b"\x00" * 8), "ELF")
         self.assertEqual(w.magic_hint(b"\x89PNG\r\n\x1a\n" + b"\x00"), "image")
         self.assertEqual(w.magic_hint(b"not magic"), "")
+        header = b"\x7fELF" + b"\x00" * 8
+        self.assertEqual(w.classify_info("data", header), "ELF")
+        self.assertEqual(w.classify_info("empty", header), "ELF")
+        self.assertEqual(w.classify_info("", header), "ELF")
+        self.assertEqual(w.classify_info("PNG image data", header), "PNG image data")
+        self.assertEqual(w.classify_info("data", b"zzzz"), "data")
 
     def test_option_like_name_is_passed_after_double_dash(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -366,7 +402,10 @@ class TriageEdgeTest(unittest.TestCase):
             report = json.loads((task / "evidence/triage.json").read_text(encoding="utf-8"))
             self.assertEqual(report[0]["file_output"], "data")
             self.assertEqual(report[0]["file_exit"], 0)
-            self.assertEqual(report[0]["category_hint"], w.GENERIC)
+            # file 只回 data 时，用 ELF 文件头补分类；真实输出仍原样写入。
+            self.assertEqual(report[0]["category_hint"], "reverse/pwn：依输入约束及服务行为区分")
+            self.assertEqual(report[1]["file_output"], "data")
+            self.assertEqual(report[1]["category_hint"], w.GENERIC)
 
     def test_file_timeout_does_not_write_report(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -508,7 +547,11 @@ class CheckEdgeTest(unittest.TestCase):
             self.assertIn("初步观察与分析路线正文过少，检查是否只贴脚本", w.delivery_errors(task))
             write_passing(task)
             wp = (task / "WP.md").read_text(encoding="utf-8")
-            (task / "WP.md").write_text(wp.replace(BODY, BODY + "\n```\n{{待填}}\n```\n", 1), encoding="utf-8")
+            (task / "WP.md").write_text(wp.replace(BODY, BODY + "\n```\n{{待填}}\nTODO = 1\n```\n", 1), encoding="utf-8")
+            self.assertEqual(w.delivery_errors(task), [])
+            write_passing(task)
+            wp = (task / "WP.md").read_text(encoding="utf-8")
+            (task / "WP.md").write_text(wp.replace(BODY, BODY + "\n正文仍有 TODO 未改。\n", 1), encoding="utf-8")
             self.assertIn("WP残留模板占位符", w.delivery_errors(task))
             write_passing(task)
             wp = (task / "WP.md").read_text(encoding="utf-8")

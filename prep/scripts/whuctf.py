@@ -45,8 +45,16 @@ NOTES = (
 )
 _NAME_INVALID = re.compile(r'[\x00-\x1f\x7f<>:"|?*\\/]')
 _FENCE = re.compile(r"^```[^\n]*\n.*?^```[ \t]*$", re.S | re.M)
+_PLACEHOLDER = re.compile(r"\{\{.*?\}\}|\bTODO\b|\bTBD\b")
 _MAX_NAME_BYTES = 255
 _FILE_TIMEOUT_SECONDS = 10
+_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{n}" for n in range(1, 10)}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
+# file(1) 在无法识别时常见的泛化输出；此时改用文件头提示分类。
+_GENERIC_FILE_OUTPUT = frozenset({"data", "empty", "empty file"})
 _MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"\x7fELF", "ELF"),
     (b"MZ", "MS-DOS executable PE32"),
@@ -144,6 +152,12 @@ def valid_flag(value: str) -> bool:
     return re.fullmatch(rf"(?:{pattern})\{{[^{{}}]+\}}", value) is not None
 
 
+def _reserved_device_name(name: str) -> bool:
+    """Windows 保留设备名（CON、COM1 等），含 CON.txt 这种带扩展名的形式。"""
+    primary = name.split(".", 1)[0].upper()
+    return primary in _WINDOWS_RESERVED
+
+
 def validate_challenge_name(name: object) -> str:
     if not isinstance(name, str):
         raise ValueError("题目名称必须是单一目录名")
@@ -151,6 +165,8 @@ def validate_challenge_name(name: object) -> str:
         raise ValueError("题目名称过长")
     if not name or name in {".", ".."} or name != name.strip() or name.endswith(".") or _NAME_INVALID.search(name):
         raise ValueError("题目名称必须是单一目录名")
+    if _reserved_device_name(name):
+        raise ValueError(f"题目名称不能使用保留设备名: {name}")
     return name
 
 
@@ -169,7 +185,31 @@ def resolve_attachment(path: Path) -> Path:
         raise ValueError(f"附件必须是文件: {resolved}")
     if not resolved.name or resolved.name in {".", ".."} or re.search(r"[\x00-\x1f\x7f]", resolved.name):
         raise ValueError(f"附件文件名不合法: {resolved.name!r}")
+    # 归档名带 NN- 前缀，源文件即使叫 CON.txt 也会变成 00-CON.txt，不在此拦截。
     return resolved
+
+
+def _strip_execute_bits(path: Path) -> None:
+    """归档副本去掉可执行位；需要运行时在 work/ 里自行 chmod，CLI 不执行附件。"""
+    mode = path.stat().st_mode
+    cleaned = mode & ~(stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    if cleaned != mode:
+        path.chmod(cleaned)
+
+
+def _cleanup_stale_init(root_dir: Path) -> None:
+    """清理上次异常中断留下的 .init-* 目录。无法拦截 SIGKILL，靠下次 init 收尾。"""
+    try:
+        entries = list(root_dir.glob(".init-*"))
+    except OSError:
+        return
+    for path in entries:
+        try:
+            if path.is_symlink() or not path.is_dir():
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            continue
 
 
 def validate_urls(urls: Optional[Sequence[object]]) -> list[str]:
@@ -244,6 +284,7 @@ def init(args: Any) -> None:
     if dest.exists():
         raise ValueError(f"题目目录已存在，保留现有内容: {dest}")
     root_dir.mkdir(parents=True, exist_ok=True)
+    _cleanup_stale_init(root_dir)
     if dest.exists():
         raise ValueError(f"题目目录已存在，保留现有内容: {dest}")
     staging = Path(tempfile.mkdtemp(prefix=".init-", dir=root_dir))
@@ -297,10 +338,12 @@ def _populate(
         target = staging / "original" / f"{index:02d}-{src.name}"
         digest = sha256(src)
         shutil.copy2(src, target)
+        _strip_execute_bits(target)
         if sha256(target) != digest:
             raise ValueError("原件复制hash不一致")
         work_copy = staging / "work" / target.name
         shutil.copy2(target, work_copy)
+        _strip_execute_bits(work_copy)
         if sha256(work_copy) != digest:
             raise ValueError("原件复制hash不一致")
         manifest["files"].append(
@@ -317,11 +360,19 @@ def _populate(
 
 
 def magic_hint(header: bytes) -> str:
-    """file 没有输出时使用的文件头提示，词表与 classify 已有关键字对齐。"""
+    """file 没有输出或输出泛化时使用的文件头提示，词表与 classify 已有关键字对齐。"""
     for signature, label in _MAGIC:
         if header.startswith(signature):
             return label
     return ""
+
+
+def classify_info(info: str, header: bytes) -> str:
+    """选择送入 classify 的说明：保留有信息的 file 输出；空或 data/empty 时回退文件头。"""
+    cleaned = (info or "").strip()
+    if cleaned and cleaned.lower() not in _GENERIC_FILE_OUTPUT:
+        return cleaned
+    return magic_hint(header) or cleaned
 
 
 def classify(path: Path, info: str) -> str:
@@ -365,7 +416,6 @@ def triage(args: Any) -> None:
         command, info, exit_code = _run_file(archived, file_available)
         with archived.open("rb") as handle:
             header = handle.read(32)
-        hint_info = info if info else magic_hint(header)
         report.append(
             {
                 "path": item["archived"],
@@ -374,7 +424,7 @@ def triage(args: Any) -> None:
                 "file_output": info,
                 "file_exit": exit_code,
                 "header_hex": header.hex(),
-                "category_hint": classify(archived, hint_info),
+                "category_hint": classify(archived, classify_info(info, header)),
             }
         )
     (root / "evidence").mkdir(exist_ok=True)
@@ -454,7 +504,8 @@ def delivery_errors(root: Path) -> list[str]:
         flag_body = flag_section.group(1) or ""
         if flag_body.strip() not in {flag, f"```text\n{flag}\n```", f"```\n{flag}\n```"}:
             errors.append("完整 flag末节只放完整flag，其后立即结束")
-    if re.search(r"\{\{.*?\}\}|\bTODO\b|\bTBD\b", wp):
+    # 只检查正文：完整脚本代码块里的 TODO/{{...}} 不算未完成模板。
+    if _PLACEHOLDER.search(prose_wp):
         errors.append("WP残留模板占位符")
     if flag and flag not in wp:
         errors.append("WP未包含本次flag")
@@ -462,7 +513,7 @@ def delivery_errors(root: Path) -> list[str]:
         errors.append("代码块未闭合")
     for title in ("初步观察与分析路线", "逐步分析与解题"):
         match = re.search(rf"^##\s+\d+\.\s+{re.escape(title)}\s*\n(.*?)(?=^##\s|\Z)", prose_wp, re.S | re.M)
-        if match and len(re.sub(r"\s+", "", re.sub(r"```.*?```", "", match.group(1), flags=re.S))) < 45:
+        if match and len(re.sub(r"\s+", "", match.group(1))) < 45:
             errors.append(f"{title}正文过少，检查是否只贴脚本")
     errors.extend(_validation_errors(root, flag))
     errors.extend(_manifest_problems(root))

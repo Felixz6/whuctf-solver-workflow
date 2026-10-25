@@ -29,9 +29,9 @@ python3 prep/scripts/whuctf.py triage challenges/sample
 python3 prep/scripts/whuctf.py check challenges/sample
 ```
 
-`init` 把附件复制到 `original/`，再复制一份到 `work/`，并写 `manifest.json`、`description.md`、`notes.md` 和 `WP.md`。复制后核对 SHA-256。输入不合法、原件在复制过程中被改动，或题目目录已存在时，命令失败，不会留下半个题目目录。真旗确认前不创建 `flag.txt`。符号链接附件会按目标普通文件的内容归档，管道和目录会被拒绝。
+`init` 把附件复制到 `original/`，再复制一份到 `work/`，并写 `manifest.json`、`description.md`、`notes.md` 和 `WP.md`。复制后核对 SHA-256，并去掉归档副本上的可执行位；需要运行时在 `work/` 里自行 `chmod`，CLI 不执行附件。输入不合法、原件在复制过程中被改动，或题目目录已存在时，命令失败，不会留下半个题目目录。下次 `init` 还会清掉同根目录下残留的 `.init-*` 临时目录。真旗确认前不创建 `flag.txt`。符号链接附件会按目标普通文件的内容归档，管道和目录会被拒绝。
 
-`triage` 重新计算 `original/` 的 SHA-256，与 manifest 不一致即失败。它不跟随 `original/` 里的符号链接。分类提示只供参考，不参与 `check`。
+`triage` 重新计算 `original/` 的 SHA-256，与 manifest 不一致即失败。它不跟随 `original/` 里的符号链接。`file` 输出为空或仅为 `data` / `empty` 时，会用文件头补分类提示；有信息的 `file` 输出仍优先。分类提示只供参考，不参与 `check`。
 
 `check` 检查结构，不证明 flag 或 WP 推理正确，也不会访问题目服务。
 
@@ -47,7 +47,7 @@ python3 prep/scripts/whuctf.py check challenges/sample
 
 ### 题目名
 
-`--name` 只接受一个目录名。空串、`.`、`..`、路径分隔符、控制字符、`<>:"|?*`、首尾空白和结尾点号都会被拒绝。中文、中间的空格和中间的点号可以使用。名称按 UTF-8 计，最长 255 字节。这样生成的目录可以在 Windows 上保存。
+`--name` 只接受一个目录名。空串、`.`、`..`、路径分隔符、控制字符、`<>:"|?*`、首尾空白、结尾点号，以及 Windows 保留设备名（如 `CON`、`COM1`、`nul.txt`）都会被拒绝。中文、中间的空格和中间的点号可以使用。名称按 UTF-8 计，最长 255 字节。这样生成的目录可以在 Windows 上保存。
 
 ### 安装技能
 
