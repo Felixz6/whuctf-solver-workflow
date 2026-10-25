@@ -24,7 +24,7 @@ python3 prep/scripts/whuctf.py triage challenges/题目名
 python3 prep/scripts/whuctf.py check challenges/题目名
 ```
 
-`init` 会将输入归档到 `original/` 并复制到 `work/`，保存 SHA-256、manifest、notes 和 WP 模板；不会运行附件或自动提交 flag。检查 `notes.md` 后再选择实际类别。`triage` 使用系统 `file` 命令识别文件类型并校验归档 hash，也不会运行附件。
+`init` 会将输入归档到 `original/` 并复制到 `work/`，保存 SHA-256、manifest、notes 和 WP 模板；不会运行附件或自动提交 flag。检查 `notes.md` 后再选择实际类别。`triage` 校验归档 hash。系统有 `file` 时记录它的标准输出；有附件但没有该命令时向标准错误警告一次，只根据扩展名和文件头做分类提示。两种情况都不运行附件，也不跟随 `original/` 里的符号链接。
 
 - 原件保持不变；解包、patch、脱壳、hook 和调试只在 `work/` 副本中进行。
 - 记录影响路线的命令、输入、输出、退出码、中间值、假设和反证到 `notes.md` 与 `evidence/`。
@@ -54,13 +54,14 @@ python3 prep/scripts/whuctf.py check challenges/题目名
 - Crypto 写出参数、方程、边界和中间值，再代回原方程或重加密验证。
 - Pwn 逐项解释偏移、地址、gadget、参数和字节序；与题目一致的运行环境中验证。
 - Misc/取证记录每层输入、转换参数和产物；按 magic 和结构分析，不只看扩展名。
-- 候选 flag 原样写入 `candidate_flag.txt`，并在 `notes.md` 记录依据与待验证点；候选不是完成状态。
+- 候选 flag 原样写入 `candidate_flag.txt`，并在 `notes.md` 记录依据与待验证点。候选不是完成状态。CLI 不创建也不检查这个文件。
 - 只有原校验器、原程序、题目服务/平台明确接受，或严谨重建并验证了校验逻辑，才将精确 flag 写入 `flag.txt`。保留大小写和前缀；允许格式来自 `prep/whuctf-profile.json`。
-- `whuctf.py check` 是交付结构检查，不代替解题复现或平台接受。
+- 验证证据写入 `evidence/validation.json`。`kind` 取 `original_checker`、`reconstructed_checker`、`remote_response` 或 `platform_accepted`，分别对应原校验器、重建校验、题目服务响应和平台接受。`accepted` 必须是布尔值 `true`。字段和路径限制见 [WP 质量约定](references/writeup-contract.md)。
+- `whuctf.py check` 是交付结构检查，不代替解题复现或平台接受。退出码 0 才算结构通过，1 是结构未通过，2 是目录或参数错误。
 
 ## WP 与交付
 
-WP 从“初步观察与分析路线”开始，按真实过程解释观察、推导、操作和结果。若脚本参与求解，在“完整 flag”前增加独立编号的“完整利用脚本”章节，提供实际完整脚本、依赖和调用方式；前文仍要解释关键推导。末节是“完整 flag”，编号按正文递增，之后结束。详见 [WP 质量约定](references/writeup-contract.md) 和 [模板](assets/WP.template.md)。
+WP 从“初步观察与分析路线”开始，按真实过程解释观察、推导、操作和结果。若脚本参与求解，在“完整 flag”前增加独立编号的“完整利用脚本”章节，提供实际完整脚本、依赖和调用方式；前文仍要解释关键推导。末节是“完整 flag”，编号按正文递增，之后结束。检查器强制的章节、占位符和验证记录见 [WP 质量约定](references/writeup-contract.md)。模板以仓库里的 `prep/templates/WP.template.md` 为准；[技能内副本](assets/WP.template.md) 必须与它保持一致，以便本目录被单独复制后仍能使用。
 
 原件 hash、环境、失败记录和验证日志留在题目目录，不把验旗自证或内部路径塞进 WP。写作前如环境提供 `humanizer` 技能则加载润色，不改技术事实。
 
