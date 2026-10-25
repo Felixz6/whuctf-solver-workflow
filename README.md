@@ -1,78 +1,120 @@
 # WHUCTF Solver Workflow
 
-一套面向 WHUCTF/CTF 的题目归档 CLI、中文解题技能和 WP 模板。项目由个人工作流整理而成，与赛事主办方无隶属或背书关系；具体题目仍按题面和比赛当次规则处理。
+面向 WHUCTF/CTF 的个人题目归档 CLI、中文解题技能和 WP 模板。与赛事主办方无隶属或背书关系；具体题目仍按题面和当次比赛规则处理。
 
-工具只处理题面，以及用户明确指定的本地附件路径：不执行附件、不连接网络、不自动提交 flag。
+**边界：** 只处理题面，以及你明确指定的本地附件路径。不执行附件、不连接网络、不自动提交 flag。真旗由你手动验证；`check` 只做本地结构与证据一致性检查。
 
-## 内容
+## 仓库里有什么
 
-- `prep/scripts/whuctf.py`：归档输入、静态分诊、检查 WP 与验证证据的结构。
-- `prep/whuctf-profile.json`：flag 前缀和其他工作流备忘。CLI 只强制使用 `flag_prefixes`。
-- `prep/templates/WP.template.md`：`init` 写入 `WP.md` 的模板，是模板的唯一来源。
-- `prep/tests/`：标准库单元测试。
-- `skills/whuctf-solver/`：可单独拷贝的解题技能。其中 `assets/WP.template.md` 必须与上面的模板保持一致。
+| 路径 | 作用 |
+|---|---|
+| `prep/scripts/whuctf.py` | `init` / `triage` / `check` |
+| `prep/whuctf-profile.json` | flag 前缀等备忘；CLI 只使用 `flag_prefixes` |
+| `prep/templates/WP.template.md` | `init` 写入 `WP.md` 的模板（权威来源） |
+| `prep/tests/` | 标准库单元测试 |
+| `skills/whuctf-solver/` | 可单独安装的解题技能；内含 WP 模板副本 |
+| `challenges/` | 默认题目目录（已 gitignore，勿提交真实题数据） |
 
-## 要求
+## 环境
 
-- Python 3.9 或更高版本。CLI 和测试只使用标准库。
-- 文本按 UTF-8 读写。写出的题目文件使用 LF。`flag.txt` 读入时接受 LF 或 CRLF，并只去掉至多一个结尾换行。
-- `triage` 在 `PATH` 里能找到 `file` 时用它识别类型。有附件但没有该命令时，仍校验 hash，向标准错误打印一条警告，并只根据扩展名和文件头给出分类提示。
+- Python 3.9+；CLI 与测试仅用标准库
+- 文本按 UTF-8；写出的题目文件使用 LF
+- `triage` 可选系统 `file`（常见于 macOS / Linux）。没有也能跑：仍校验 hash，并按扩展名与文件头给分类提示
 
-可以从任意工作目录运行。`prep/` 的位置按脚本文件解析，不依赖当前目录。
+脚本路径按文件位置解析，可在任意工作目录调用。
 
-## 使用
+## 快速开始
+
+在仓库根目录：
 
 ```bash
 python3 -m unittest discover -s prep/tests -v
-python3 prep/scripts/whuctf.py init --name sample --description-file prompt.md --attachment challenge.bin --url https://example.invalid/task
+
+python3 prep/scripts/whuctf.py init \
+  --name sample \
+  --description-file prompt.md \
+  --attachment challenge.bin \
+  --url https://example.invalid/task
+
 python3 prep/scripts/whuctf.py triage challenges/sample
 python3 prep/scripts/whuctf.py check challenges/sample
 ```
 
-`init` 把附件复制到 `original/`，再复制一份到 `work/`，并写 `manifest.json`、`description.md`、`notes.md` 和 `WP.md`。复制后核对 SHA-256，并去掉归档副本上的可执行位；需要运行时在 `work/` 里自行 `chmod`，CLI 不执行附件。输入不合法、原件在复制过程中被改动，或题目目录已存在时，命令失败，不会留下半个题目目录。下次 `init` 还会清掉同根目录下残留的 `.init-*` 临时目录。真旗确认前不创建 `flag.txt`。符号链接附件会按目标普通文件的内容归档，管道和目录会被拒绝。
+更多参数见 `python3 prep/scripts/whuctf.py -h` 与各子命令 `-h`。
 
-`triage` 重新计算 `original/` 的 SHA-256，与 manifest 不一致即失败。它不跟随 `original/` 里的符号链接。`file` 输出为空或仅为 `data` / `empty` 时，会用文件头补分类提示；有信息的 `file` 输出仍优先。分类提示只供参考，不参与 `check`。
+## 命令说明
 
-`check` 检查结构，不证明 flag 或 WP 推理正确，也不会访问题目服务。
+### `init` — 建题归档
+
+生成 `challenges/<name>/`（可用 `--root` 改根目录），大致结构：
+
+```text
+challenges/sample/
+  description.md      # 题面
+  manifest.json       # 名称、时间、URL、原件 sha256
+  notes.md            # 过程记录
+  WP.md               # 由模板生成
+  original/           # 原件（勿改）
+  work/               # 可改的工作副本
+  evidence/           # 分诊与验证证据
+```
+
+要点：
+
+- 附件先拷到 `original/`，再拷到 `work/`；核对 SHA-256；去掉归档副本的可执行位（源文件不动；要跑就在 `work/` 里自己 `chmod`）
+- 真旗确认前不创建 `flag.txt`
+- 输入非法、复制中途失败或目录已存在时失败，不留半成品；下次 `init` 还会清掉同根下残留的 `.init-*`
+- 符号链接按目标普通文件归档；目录 / 管道拒绝
+- `--name`：单一目录名；拒绝路径分隔符、控制字符、`<>:"|?*`、首尾空白、结尾点号、Windows 保留名（如 `CON`、`COM1`）；中文与中间空格可用；最长 255 字节（UTF-8）
+
+### `triage` — 静态分诊
+
+- 重算 `original/` 的 SHA-256，与 manifest 不一致则失败
+- 不跟随 `original/` 内的符号链接，不执行附件
+- 有 `file` 则记录其输出；输出为空或仅为 `data` / `empty` 时，用文件头补分类提示
+- 写出 `evidence/triage.json`；`category_hint` 仅供参考，不参与 `check`
+
+### `check` — 交付结构检查
+
+核对 `flag.txt`、`WP.md`、`evidence/validation.json`（及可选的 `manifest.json`）是否自洽。
+
+它**不**证明 flag 正确、**不**评判 WP 推理、**不**访问题目服务或平台。通过后仍须你自己复现或人工确认。
+
+详细强制项与写作约定见 [`skills/whuctf-solver/references/writeup-contract.md`](skills/whuctf-solver/references/writeup-contract.md)。摘要：
+
+- flag 匹配 `flag_prefixes`；`flag.txt` 允许 LF/CRLF，读入后只去掉至多一个结尾换行
+- WP 从「初步观察与分析路线」连续编号到「完整 flag」；末节只放 flag
+- 正文（不含代码块）无 `{{...}}` / `TODO` / `TBD`；代码块须闭合；前两节不能只有脚本
+- 验证记录含合法 `kind`、`accepted: true`、命令与输入、题目录内输出文件及其 sha256，且输出中出现 flag
 
 ### 退出码
 
 | 码 | 含义 |
 |---|---|
 | 0 | 成功 |
-| 1 | `check` 未通过。原因以 `FAIL:` 打在标准输出 |
-| 2 | 参数、路径或运行错误。原因以 `ERROR:` 打在标准错误 |
+| 1 | `check` 未通过（`FAIL:` → 标准输出） |
+| 2 | 参数 / 路径 / 运行错误（`ERROR:` → 标准错误） |
 
-损坏的 `manifest.json`、缺失的原件和无法解析的验证记录都算结构问题，走退出码 1。题目目录不存在或路径不是目录，走退出码 2。
+结构问题（坏 manifest、缺原件、坏验证记录）用 **1**。题目目录不存在或不是目录用 **2**。
 
-### 题目名
+## 配置与本地数据
 
-`--name` 只接受一个目录名。空串、`.`、`..`、路径分隔符、控制字符、`<>:"|?*`、首尾空白、结尾点号，以及 Windows 保留设备名（如 `CON`、`COM1`、`nul.txt`）都会被拒绝。中文、中间的空格和中间的点号可以使用。名称按 UTF-8 计，最长 255 字节。这样生成的目录可以在 Windows 上保存。
+编辑 `prep/whuctf-profile.json` 的 `flag_prefixes` 以匹配当次赛事；示例不代替赛事说明。文件不含服务凭据。
 
-### 安装技能
+`priority`、`writeup_mode`、`final_files`、`require_validation_evidence` 只是备忘，**CLI 不读**。`check` 始终要求验证记录，不能靠改配置关掉。
 
-将 `skills/whuctf-solver/` 复制到 agent 的技能目录，例如 Codex 的 `.agents/skills/whuctf-solver/`，或 DeepSeek Harness 的 `.dsh/skills/whuctf-solver/`。然后重载或重新打开 agent。
+`challenges/` 会含附件、日志、候选与最终 flag，默认被忽略。不要把真实题目数据、平台凭据或 flag 推到公共仓库。
 
-技能目录里的 WP 模板是副本，便于单独安装。修改措辞时以 `prep/templates/WP.template.md` 为准，并同步副本。测试会检查两份文件的字节一致。
+## 安装解题技能
 
-## 结构检查
+把 `skills/whuctf-solver/` 拷到 agent 技能目录，例如：
 
-`flag.txt`、`WP.md` 和 `evidence/validation.json` 都存在时，`check` 核对：
+- Codex：`.agents/skills/whuctf-solver/`
+- DeepSeek Harness：`.dsh/skills/whuctf-solver/`
 
-- flag 匹配 `flag_prefixes`，除已去掉的结尾换行外没有控制字符
-- WP 从「初步观察与分析路线」连续编号到「完整 flag」
-- 末节只有 flag 本身，或只包在信息字符串为 `text` 或为空的代码块里
-- 没有模板占位符、未闭合的代码块，且前两节不只是脚本
-- 验证记录的类型、通过标记、命令、输入、输出路径和 SHA-256，以及输出中是否出现 flag
-- 若存在 `manifest.json`，原件仍是 `original/` 下的普通文件且 hash 未变
+然后重载或重新打开 agent。
 
-写法上的其他要求见 `skills/whuctf-solver/references/writeup-contract.md`。那里把检查器强制执行的条件和只要求作者遵守的写法分开写了。
-
-## 本地题目数据
-
-默认题目目录是 `challenges/`。其中会有附件、日志、候选和最终 flag，已被 `.gitignore` 排除。不要把真实题目数据、平台凭据或 flag 提交到公共仓库。
-
-`prep/whuctf-profile.json` 不含服务凭据。按当次赛事修改 `flag_prefixes`；本文件里的示例和历史规则都不能代替赛事说明。`priority`、`writeup_mode`、`final_files` 和 `require_validation_evidence` 只是工作流备忘，CLI 不读取。`check` 始终要求验证记录，不能靠把 `require_validation_evidence` 改成 false 来跳过。
+技能内 `assets/WP.template.md` 是副本，方便单独安装；改措辞以 `prep/templates/WP.template.md` 为准并同步副本。测试会检查两份字节一致。
 
 ## 许可
 
