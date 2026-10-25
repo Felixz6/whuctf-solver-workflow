@@ -1,0 +1,21 @@
+{
+  "flag_prefixes": [
+    "WHUCTF",
+    "whuctf",
+    "flag"
+  ],
+  "priority": [
+    "reverse",
+    "web",
+    "crypto",
+    "pwn",
+    "misc",
+    "other"
+  ],
+  "writeup_mode": "full-analysis-step-by-step",
+  "final_files": [
+    "flag.txt",
+    "WP.md"
+  ],
+  "require_validation_evidence": true
+}
